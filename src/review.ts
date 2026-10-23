@@ -36,7 +36,9 @@ const extraInstructions = process.env.INPUT_EXTRA_INSTRUCTIONS?.trim() ?? "";
 const workspaceId = process.env.INPUT_ANTHROPIC_WORKSPACE_ID?.trim() || "default";
 
 const octokit = new Octokit({ auth: env("GITHUB_TOKEN") });
-const client = new Anthropic({ apiKey: env("ANTHROPIC_API_KEY") });
+// Uses ANTHROPIC_API_KEY when set, otherwise Workload Identity Federation via the
+// ANTHROPIC_FEDERATION_* variables and the GitHub OIDC token file.
+const client = new Anthropic();
 
 // --- Gather the PR's diff and pick the commit to clone -----------------------
 

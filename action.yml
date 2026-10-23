@@ -6,8 +6,20 @@ branding:
 
 inputs:
   anthropic-api-key:
-    description: Anthropic API key from the Console org that holds the reviewer agent.
-    required: true
+    description: >-
+      Anthropic API key from the Console org that holds the reviewer agent. Leave
+      empty to authenticate with Workload Identity Federation instead (needs
+      `id-token: write` on the job and the federation inputs below).
+    default: ""
+  anthropic-federation-rule-id:
+    description: WIF federation rule (fdrl_...). Not secret.
+    default: ""
+  anthropic-organization-id:
+    description: Anthropic organization ID (UUID). Not secret.
+    default: ""
+  anthropic-service-account-id:
+    description: The federation rule's target service account (svac_...). Not secret.
+    default: ""
   github-token:
     description: Token used to read the PR, clone the repo into the sandbox, and post the review.
     default: ${{ github.token }}
@@ -30,11 +42,26 @@ runs:
     - name: Install dependencies
       shell: bash
       run: npm ci --omit=dev --no-audit --no-fund --prefix "$GITHUB_ACTION_PATH"
+    - name: Get Anthropic identity token
+      if: inputs.anthropic-api-key == ''
+      shell: bash
+      run: |
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::error::No anthropic-api-key given and no OIDC token available. Add 'id-token: write' to the job's permissions."
+          exit 1
+        fi
+        curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
+          | jq -r .value > "$RUNNER_TEMP/anthropic-identity-token"
+        echo "ANTHROPIC_IDENTITY_TOKEN_FILE=$RUNNER_TEMP/anthropic-identity-token" >> "$GITHUB_ENV"
     - name: Run review
       shell: bash
       run: node "$GITHUB_ACTION_PATH/src/review.ts"
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        ANTHROPIC_FEDERATION_RULE_ID: ${{ inputs.anthropic-federation-rule-id }}
+        ANTHROPIC_ORGANIZATION_ID: ${{ inputs.anthropic-organization-id }}
+        ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.anthropic-service-account-id }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_BUDGET_USD: ${{ inputs.budget-usd }}
         INPUT_EXTRA_INSTRUCTIONS: ${{ inputs.extra-instructions }}

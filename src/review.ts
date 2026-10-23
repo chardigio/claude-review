@@ -1,0 +1,261 @@
+// Runs inside GitHub Actions on a pull_request_target event. Starts a Managed
+// Agents session that reviews the PR, waits for it to finish, and posts the
+// agent's findings back to the PR as a single review.
+
+import Anthropic, { toFile } from "@anthropic-ai/sdk";
+import { Octokit } from "@octokit/rest";
+import { readFileSync } from "node:fs";
+import { AGENT_NAME, ENVIRONMENT_NAME, REVIEW_OUTPUT_PATH } from "./agent.ts";
+import { findAgent, findEnvironment } from "./lookup.ts";
+
+const SESSION_DEADLINE_MS = 25 * 60 * 1000;
+const MAX_INLINE_COMMENTS = 25;
+
+type ReviewComment = {
+  path: string;
+  line: number;
+  start_line?: number;
+  severity?: string;
+  body: string;
+};
+type Review = { summary: string; comments: ReviewComment[] };
+
+function env(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable ${name}`);
+  return value;
+}
+
+const event = JSON.parse(readFileSync(env("GITHUB_EVENT_PATH"), "utf8"));
+const pr = event.pull_request;
+if (!pr) throw new Error("This action only runs on pull_request or pull_request_target events.");
+
+const [owner, repo] = env("GITHUB_REPOSITORY").split("/");
+const budgetUsd = Number(process.env.INPUT_BUDGET_USD || "5");
+const extraInstructions = process.env.INPUT_EXTRA_INSTRUCTIONS?.trim() ?? "";
+const workspaceId = process.env.INPUT_ANTHROPIC_WORKSPACE_ID?.trim() || "default";
+
+const octokit = new Octokit({ auth: env("GITHUB_TOKEN") });
+const client = new Anthropic({ apiKey: env("ANTHROPIC_API_KEY") });
+
+// --- Gather the PR's diff and pick the commit to clone -----------------------
+
+const { data: diff } = await octokit.pulls.get({
+  owner,
+  repo,
+  pull_number: pr.number,
+  mediaType: { format: "diff" },
+});
+const diffText = diff as unknown as string;
+
+// Same-repo PRs: clone the head commit directly. Fork PRs: clone the merge base
+// (always present in the base repo) and have the agent apply the diff on top.
+const isFork = pr.head.repo?.full_name !== pr.base.repo.full_name;
+let checkoutSha: string = pr.head.sha;
+if (isFork) {
+  checkoutSha = pr.base.sha;
+  try {
+    const { data } = await octokit.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead: `${pr.base.sha}...${pr.head.sha}`,
+      per_page: 1,
+    });
+    checkoutSha = data.merge_base_commit.sha;
+  } catch (err) {
+    console.log(`Could not find the merge base, cloning the base branch instead: ${err}`);
+  }
+}
+
+// --- Start the session ------------------------------------------------------
+
+const [agent, environment] = await Promise.all([
+  findAgent(client, AGENT_NAME),
+  findEnvironment(client, ENVIRONMENT_NAME),
+]);
+if (!agent || !environment) {
+  throw new Error(
+    `Agent "${AGENT_NAME}" or environment "${ENVIRONMENT_NAME}" not found in this Anthropic org. ` +
+      `Run the "Set up reviewer agent" workflow in the claude-review repo first.`,
+  );
+}
+
+const diffFile = await client.files.upload({
+  file: await toFile(Buffer.from(diffText, "utf8"), "pr.diff", { type: "text/plain" }),
+});
+
+const checkoutNote = isFork
+  ? `The repo is checked out at ${checkoutSha}, the merge base. This PR comes from a fork, so ` +
+    `first run \`git apply /mnt/session/uploads/pr.diff\` in the repo to get the PR's version of ` +
+    `the code. If it doesn't apply cleanly, review from the diff and the base code.`
+  : `The repo is checked out at the PR's head commit ${checkoutSha}, so the working tree ` +
+    `already contains the PR's changes.`;
+
+const message = [
+  `Review pull request #${pr.number} in ${owner}/${repo}.`,
+  `Base branch: ${pr.base.ref}. Head branch: ${pr.head.label}.`,
+  checkoutNote,
+  `<pr_title>${pr.title}</pr_title>`,
+  `<pr_description>\n${pr.body ?? "(none)"}\n</pr_description>`,
+  extraInstructions && `Additional instructions from the repo owner:\n${extraInstructions}`,
+  `Write your review to ${REVIEW_OUTPUT_PATH} when you're done.`,
+]
+  .filter(Boolean)
+  .join("\n\n");
+
+const session = await client.beta.sessions.create({
+  agent: agent.id,
+  environment_id: environment.id,
+  title: `${owner}/${repo}#${pr.number}: ${pr.title}`.slice(0, 200),
+  metadata: { repo: `${owner}/${repo}`, pr: String(pr.number), head_sha: pr.head.sha },
+  budget: {
+    type: "limit",
+    max_list_cost: { amount: String(Math.round(budgetUsd * 100)), currency: "USD" },
+  },
+  resources: [
+    {
+      type: "github_repository",
+      url: pr.base.repo.html_url,
+      // The Actions token is injected by Anthropic's git proxy, never placed in
+      // the sandbox. Public repos would clone without it.
+      authorization_token: env("GITHUB_TOKEN"),
+      checkout: { type: "commit", sha: checkoutSha },
+    },
+    { type: "file", file_id: diffFile.id, mount_path: "/pr.diff" },
+  ],
+});
+console.log(`Session ${session.id}`);
+console.log(`Watch it live: https://platform.claude.com/workspaces/${workspaceId}/sessions/${session.id}`);
+
+// --- Run it to completion -----------------------------------------------------
+
+// Open the stream before sending the message so no events are missed.
+const stream = await client.beta.sessions.events.stream(session.id);
+await client.beta.sessions.events.send(session.id, {
+  events: [{ type: "user.message", content: [{ type: "text", text: message }] }],
+});
+
+let lastAgentText = "";
+let stopReason = "unknown";
+const deadline = setTimeout(() => {
+  console.log("Session ran past the deadline, interrupting it.");
+  client.beta.sessions.events
+    .send(session.id, { events: [{ type: "user.interrupt" }] })
+    .catch((err) => console.log(`Interrupt failed: ${err}`));
+}, SESSION_DEADLINE_MS);
+
+for await (const ev of stream) {
+  if (ev.type === "agent.message") {
+    const text = ev.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+    if (text) {
+      lastAgentText = text;
+      console.log(`[agent] ${text}`);
+    }
+  } else if (ev.type === "agent.tool_use") {
+    console.log(`[tool] ${ev.name}`);
+    if (ev.evaluated_permission === "ask") {
+      // Shouldn't happen with always_allow, but nobody is around to approve.
+      await client.beta.sessions.events.send(session.id, {
+        events: [
+          {
+            type: "user.tool_confirmation",
+            tool_use_id: ev.id,
+            result: "deny",
+            deny_message: "This run is unattended; continue without this tool call.",
+          },
+        ],
+      });
+    }
+  } else if (ev.type === "session.error") {
+    console.log(`[session error] ${JSON.stringify(ev)}`);
+  } else if (ev.type === "session.status_idle") {
+    if (ev.stop_reason.type === "requires_action") continue;
+    stopReason = ev.stop_reason.type;
+    break;
+  } else if (ev.type === "session.status_terminated") {
+    stopReason = "terminated";
+    break;
+  }
+}
+clearTimeout(deadline);
+console.log(`Session stopped: ${stopReason}`);
+
+// --- Collect the review -------------------------------------------------------
+
+async function downloadReview(): Promise<Review | undefined> {
+  // Output files show up in the Files API a few seconds after the session idles.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const files = await client.beta.files.list({
+      scope_id: session.id,
+      betas: ["managed-agents-2026-04-01"],
+    });
+    const file = files.data.find((f) => f.filename === "review.json");
+    if (file) {
+      const resp = await client.beta.files.download(file.id);
+      return JSON.parse(await resp.text()) as Review;
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return undefined;
+}
+
+let review: Review | undefined;
+try {
+  review = await downloadReview();
+} catch (err) {
+  console.log(`Could not read review.json: ${err}`);
+}
+if (!review) {
+  review = {
+    summary: lastAgentText || `The review session ended (${stopReason}) without producing a review.`,
+    comments: [],
+  };
+}
+
+const finished = await client.beta.sessions.retrieve(session.id);
+const cents = Number(finished.usage?.list_cost?.amount ?? 0);
+const footer =
+  `\n\n---\n<sub>Reviewed by Claude (Managed Agents) · list cost $${(cents / 100).toFixed(2)}` +
+  ` · session \`${session.id}\`</sub>`;
+
+// --- Post it to the PR ----------------------------------------------------------
+
+const comments = (review.comments ?? []).slice(0, MAX_INLINE_COMMENTS).map((c) => {
+  const label = c.severity ? `**${c.severity}:** ` : "";
+  const multiLine = c.start_line && c.start_line < c.line;
+  return {
+    path: c.path,
+    line: c.line,
+    side: "RIGHT" as const,
+    ...(multiLine ? { start_line: c.start_line, start_side: "RIGHT" as const } : {}),
+    body: label + c.body,
+  };
+});
+
+try {
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number: pr.number,
+    commit_id: pr.head.sha,
+    event: "COMMENT",
+    body: review.summary + footer,
+    comments,
+  });
+} catch (err) {
+  // GitHub rejects the whole review if any comment points outside the diff.
+  // Fall back to putting every finding in the review body.
+  console.log(`Inline review failed (${err}); posting findings in the review body.`);
+  const listed = comments
+    .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
+    .join("\n");
+  await octokit.pulls.createReview({
+    owner,
+    repo,
+    pull_number: pr.number,
+    commit_id: pr.head.sha,
+    event: "COMMENT",
+    body: review.summary + (listed ? `\n\n${listed}` : "") + footer,
+  });
+}
+console.log(`Posted review with ${comments.length} inline comments.`);

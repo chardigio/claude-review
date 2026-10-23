@@ -1,0 +1,19 @@
+{
+  "name": "claude-review",
+  "private": true,
+  "type": "module",
+  "description": "PR review bot built on Claude Managed Agents, packaged as a GitHub Action.",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "setup": "node src/setup.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.1.0",
+    "@octokit/rest": "22.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

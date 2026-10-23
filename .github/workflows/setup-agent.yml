@@ -1,0 +1,26 @@
+# Creates or updates the reviewer agent and its environment in your Anthropic
+# org. Run it once after adding ANTHROPIC_API_KEY to this repo's secrets, and
+# again whenever you change src/agent.ts.
+name: Set up reviewer agent
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [src/agent.ts]
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --omit=dev --no-audit --no-fund
+      - run: node src/setup.ts
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

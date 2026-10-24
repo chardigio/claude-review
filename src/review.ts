@@ -97,7 +97,7 @@ const message = [
   // Project settings would let the PR add hooks or MCP servers to Claude Code,
   // so only user settings load. The budget caps Claude Code's own spend.
   `Run this from the repo root:\n\`\`\`\nIS_SANDBOX=1 claude -p "/code-review medium" --dangerously-skip-permissions ` +
-    `--setting-sources user --strict-mcp-config --max-budget-usd ${budgetUsd} > /tmp/code-review.md\n\`\`\``,
+    `--model claude-opus-5-5 --effort medium --setting-sources user --strict-mcp-config --max-budget-usd ${budgetUsd} > /tmp/code-review.md\n\`\`\``,
   `<pr_title>${pr.title}</pr_title>`,
   `<pr_description>\n${pr.body ?? "(none)"}\n</pr_description>`,
   extraInstructions &&

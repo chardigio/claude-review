@@ -63,8 +63,8 @@ export const agentConfig = {
   name: AGENT_NAME,
   description: "Runs Claude Code's /code-review on GitHub pull requests and writes inline review comments.",
   // The review itself is done by Claude Code inside the sandbox; this agent
-  // only drives it, so it runs at low effort.
-  model: { id: "claude-opus-5-5", effort: "low" },
+  // drives it and converts the findings.
+  model: { id: "claude-opus-5-5", effort: "medium" },
   system: SYSTEM_PROMPT,
   tools: [
     {

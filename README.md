@@ -17,7 +17,8 @@ is that relay: no server to host, and it gets a GitHub token for free.
 1. The workflow fires on `pull_request_target` and runs `src/review.ts`.
 2. The script fetches the PR diff, uploads it, and creates a session on the `pr-reviewer` agent with
    the repo mounted at the PR's merge base as a `github_repository` resource. Each session has a hard
-   spend cap (`budget-usd`, default $5); Claude Code's own API calls bill to the vault key instead.
+   spend cap (`budget-usd`, default $5), and Claude Code's run, which bills to the vault key, gets the
+   same cap through `--max-budget-usd`.
 3. In its sandbox, the agent applies the diff on top of the merge base, installs Claude Code, and
    runs the bundled `/code-review` at medium effort. It converts the findings into
    `/mnt/session/outputs/review.json`, one inline comment per finding tied to a changed line.
@@ -70,7 +71,11 @@ The federation rule, organization, service account, and workspace IDs are defaul
 
 - The PR's code is never checked out or run on the Actions runner, which is what makes
   `pull_request_target` safe here. It only runs inside Anthropic's sandbox.
-- The sandbox has no secrets. The GitHub token is injected by Anthropic's git proxy, and the
-  environment's network is limited to package registries.
+- The sandbox can't read any secret: the GitHub token is injected by Anthropic's git proxy and the
+  Claude Code key is swapped in at egress. But anything running in the sandbox, including code a
+  PR adds, can *use* the key on `api.anthropic.com`. Claude Code loads only user settings, so a PR
+  can't add hooks or MCP servers, but for defense in depth give the vault key its own Console
+  workspace with a low spend limit, separate from the workspace that holds the reviewer agent.
+  Network egress is limited to package registries and `api.anthropic.com`.
 - PR text is treated as data, but a malicious PR could still steer what the review says. Reviews are
   `COMMENT` only, so the worst case is a misleading comment.

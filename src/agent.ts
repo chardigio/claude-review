@@ -12,6 +12,10 @@ export const VAULT_NAME = "pr-reviewer";
 // Where the agent must write its result. review.ts downloads it after the run.
 export const REVIEW_OUTPUT_PATH = "/mnt/session/outputs/review.json";
 
+// Claude Code version the reviewer installs. /code-review's arguments and output
+// format aren't a stable interface, so bump this on purpose and watch a review.
+export const CLAUDE_CODE_VERSION = "2.1.310";
+
 export const SYSTEM_PROMPT = `You run Claude Code's bundled /code-review on a GitHub pull request
 and turn its findings into a review file. You don't review the code yourself.
 
@@ -21,15 +25,18 @@ Claude Code.
 
 Steps:
 1. In the repo, run \`git apply /mnt/session/uploads/pr.diff\` so the working
-   tree holds exactly the PR's changes as uncommitted edits. If it doesn't apply
-   cleanly, try \`git apply --3way\`; if that fails too, say so in the summary
-   and stop.
-2. Install Claude Code if \`claude\` isn't on PATH:
-   \`npm install -g @anthropic-ai/claude-code\`.
-3. From the repo root, run the review headless and save its output:
-   \`IS_SANDBOX=1 claude -p "/code-review medium" --dangerously-skip-permissions > /tmp/code-review.md\`
-   Don't add your own instructions to that prompt. If the command fails, retry
-   once; if it fails again, put the error in the summary and stop.
+   tree holds exactly the PR's changes as uncommitted edits. If it fails, run
+   \`git apply --reject /mnt/session/uploads/pr.diff\`, which applies what it
+   can (GitHub diffs carry no content for binary files) and leaves .rej files;
+   delete the .rej files and note in the summary which files weren't applied.
+2. Install Claude Code: \`npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}\`.
+3. From the repo root, run the exact command given in the run's message and
+   save its output to /tmp/code-review.md. Don't change its flags or add your
+   own instructions to the prompt. If your bash tool times out first, run it
+   with nohup in the background and poll until it exits. If it fails, retry
+   once; if it fails again, put the error in the summary and stop. If the output
+   isn't a code review (for example, the slash command wasn't recognized), say
+   so in the summary instead of converting it.
 4. Convert the findings in /tmp/code-review.md to ${REVIEW_OUTPUT_PATH}. Keep each
    finding's substance and wording; don't add, drop, or soften findings. Use
    an inline comment for every finding tied to a specific line the PR adds or
@@ -66,8 +73,10 @@ export const agentConfig = {
   tools: [
     {
       type: "agent_toolset_20260401",
-      // The sandbox holds no secrets and the repo token is read-only, so the
-      // agent can run tools without approval. No human watches these runs.
+      // No human watches these runs, so tools run without approval. The sandbox
+      // can't read any secret, but anything in it can make Anthropic API calls
+      // through the vault key and git calls through the read-only repo token;
+      // see the README's security notes.
       default_config: { enabled: true, permission_policy: { type: "always_allow" } },
       configs: [
         { name: "web_fetch", enabled: false },

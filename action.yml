@@ -26,7 +26,9 @@ inputs:
     description: Token used to read the PR, clone the repo into the sandbox, and post the review.
     default: ${{ github.token }}
   budget-usd:
-    description: Hard spend cap for one review session, in US dollars (list price).
+    description: >-
+      Spend cap in US dollars for each review, applied separately to the Managed
+      Agents session (list price) and to Claude Code's /code-review run.
     default: "5"
   extra-instructions:
     description: Repo-specific guidance appended to the review request.

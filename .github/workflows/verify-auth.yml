@@ -27,6 +27,11 @@ jobs:
           curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
             | jq -r .value > "$RUNNER_TEMP/anthropic-identity-token"
+      - name: Show the token's claims
+        # The claims a federation rule matches against. The signature is not printed.
+        run: |
+          cut -d. -f2 "$RUNNER_TEMP/anthropic-identity-token" | tr '_-' '/+' | base64 -d 2>/dev/null \
+            | jq '{iss, aud, sub, repository, repository_owner, ref, event_name, job_workflow_ref}' || true
       - name: Call the Anthropic API
         run: node src/verify-auth.ts
         env:

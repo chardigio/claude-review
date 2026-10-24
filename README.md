@@ -42,6 +42,10 @@ The federation rule, organization, service account, and workspace IDs are defaul
    A repo outside those rules can pass its own `anthropic-federation-rule-id`, or an
    `anthropic-api-key` from a secret instead.
 
+Reviews post as **claude[bot]** when the [Claude GitHub App](https://github.com/apps/claude) is
+installed on the repo: the action trades the job's identity token for a short-lived app token,
+the same way the official Claude Code action does. Without the app they post as github-actions.
+
 **Verify Anthropic auth** makes one API call with the federation rule, to check it works.
 
 ## When it runs

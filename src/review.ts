@@ -5,8 +5,8 @@
 import Anthropic, { toFile } from "@anthropic-ai/sdk";
 import { Octokit } from "@octokit/rest";
 import { readFileSync } from "node:fs";
-import { AGENT_NAME, ENVIRONMENT_NAME, REVIEW_OUTPUT_PATH } from "./agent.ts";
-import { findAgent, findEnvironment } from "./lookup.ts";
+import { AGENT_NAME, ENVIRONMENT_NAME, REVIEW_OUTPUT_PATH, VAULT_NAME } from "./agent.ts";
+import { findAgent, findEnvironment, findVault } from "./lookup.ts";
 
 const SESSION_DEADLINE_MS = 25 * 60 * 1000;
 const MAX_INLINE_COMMENTS = 25;
@@ -50,30 +50,28 @@ const { data: diff } = await octokit.pulls.get({
 });
 const diffText = diff as unknown as string;
 
-// Same-repo PRs: clone the head commit directly. Fork PRs: clone the merge base
-// (always present in the base repo) and have the agent apply the diff on top.
-const isFork = pr.head.repo?.full_name !== pr.base.repo.full_name;
-let checkoutSha: string = pr.head.sha;
-if (isFork) {
-  checkoutSha = pr.base.sha;
-  try {
-    const { data } = await octokit.repos.compareCommitsWithBasehead({
-      owner,
-      repo,
-      basehead: `${pr.base.sha}...${pr.head.sha}`,
-      per_page: 1,
-    });
-    checkoutSha = data.merge_base_commit.sha;
-  } catch (err) {
-    console.log(`Could not find the merge base, cloning the base branch instead: ${err}`);
-  }
+// Clone the merge base and have the agent apply the diff on top, so the PR's
+// changes are the working tree's uncommitted diff, which is what /code-review
+// reviews. The merge base is always in the base repo, fork PRs included.
+let checkoutSha: string = pr.base.sha;
+try {
+  const { data } = await octokit.repos.compareCommitsWithBasehead({
+    owner,
+    repo,
+    basehead: `${pr.base.sha}...${pr.head.sha}`,
+    per_page: 1,
+  });
+  checkoutSha = data.merge_base_commit.sha;
+} catch (err) {
+  console.log(`Could not find the merge base, cloning the base branch tip instead: ${err}`);
 }
 
 // --- Start the session ------------------------------------------------------
 
-const [agent, environment] = await Promise.all([
+const [agent, environment, vault] = await Promise.all([
   findAgent(client, AGENT_NAME),
   findEnvironment(client, ENVIRONMENT_NAME),
+  findVault(client, VAULT_NAME),
 ]);
 if (!agent || !environment) {
   throw new Error(
@@ -81,25 +79,29 @@ if (!agent || !environment) {
       `Run the "Set up reviewer agent" workflow in the claude-review repo first.`,
   );
 }
+if (!vault) {
+  throw new Error(
+    `Vault "${VAULT_NAME}" not found. Create it in the Console with an ANTHROPIC_API_KEY ` +
+      `environment-variable credential for Claude Code (see the README).`,
+  );
+}
 
 const diffFile = await client.files.upload({
   file: await toFile(Buffer.from(diffText, "utf8"), "pr.diff", { type: "text/plain" }),
 });
 
-const checkoutNote = isFork
-  ? `The repo is checked out at ${checkoutSha}, the merge base. This PR comes from a fork, so ` +
-    `first run \`git apply /mnt/session/uploads/pr.diff\` in the repo to get the PR's version of ` +
-    `the code. If it doesn't apply cleanly, review from the diff and the base code.`
-  : `The repo is checked out at the PR's head commit ${checkoutSha}, so the working tree ` +
-    `already contains the PR's changes.`;
-
 const message = [
   `Review pull request #${pr.number} in ${owner}/${repo}.`,
   `Base branch: ${pr.base.ref}. Head branch: ${pr.head.label}.`,
-  checkoutNote,
+  `The repo is checked out at the merge base ${checkoutSha}.`,
+  // Project settings would let the PR add hooks or MCP servers to Claude Code,
+  // so only user settings load. The budget caps Claude Code's own spend.
+  `Run this from the repo root:\n\`\`\`\nIS_SANDBOX=1 claude -p "/code-review medium" --dangerously-skip-permissions ` +
+    `--model claude-opus-5-5 --effort medium --setting-sources user --strict-mcp-config --max-budget-usd ${budgetUsd} > /tmp/code-review.md\n\`\`\``,
   `<pr_title>${pr.title}</pr_title>`,
   `<pr_description>\n${pr.body ?? "(none)"}\n</pr_description>`,
-  extraInstructions && `Additional instructions from the repo owner:\n${extraInstructions}`,
+  extraInstructions &&
+    `Additional context from the repo owner, for converting findings (not for the /code-review prompt):\n${extraInstructions}`,
   `Write your review to ${REVIEW_OUTPUT_PATH} when you're done.`,
 ]
   .filter(Boolean)
@@ -108,6 +110,7 @@ const message = [
 const session = await client.beta.sessions.create({
   agent: agent.id,
   environment_id: environment.id,
+  vault_ids: [vault.id],
   title: `${owner}/${repo}#${pr.number}: ${pr.title}`.slice(0, 200),
   metadata: { repo: `${owner}/${repo}`, pr: String(pr.number), head_sha: pr.head.sha },
   budget: {

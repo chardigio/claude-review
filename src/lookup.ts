@@ -13,3 +13,10 @@ export async function findEnvironment(client: Anthropic, name: string) {
   }
   return undefined;
 }
+
+export async function findVault(client: Anthropic, name: string) {
+  for await (const vault of client.beta.vaults.list()) {
+    if (vault.display_name === name) return vault;
+  }
+  return undefined;
+}

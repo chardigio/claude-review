@@ -16,10 +16,12 @@ is that relay: no server to host, and it gets a GitHub token for free.
 
 1. The workflow fires on `pull_request_target` and runs `src/review.ts`.
 2. The script fetches the PR diff, uploads it, and creates a session on the `pr-reviewer` agent with
-   the repo mounted as a `github_repository` resource (at the PR head, or at the merge base plus the
-   diff for fork PRs). Each session has a hard spend cap (`budget-usd`, default $5).
-3. The agent reads the change and its surroundings in its sandbox, can run tests, and writes
-   `/mnt/session/outputs/review.json`.
+   the repo mounted at the PR's merge base as a `github_repository` resource. Each session has a hard
+   spend cap (`budget-usd`, default $5), and Claude Code's run, which bills to the vault key, gets the
+   same cap through `--max-budget-usd`.
+3. In its sandbox, the agent applies the diff on top of the merge base, installs Claude Code, and
+   runs the bundled `/code-review` at medium effort. It converts the findings into
+   `/mnt/session/outputs/review.json`, one inline comment per finding tied to a changed line.
 4. The script downloads that file and posts one `COMMENT` review with inline comments. It never
    approves or requests changes.
 
@@ -34,8 +36,12 @@ each job signs in to Anthropic with its own GitHub identity token, so no repo ho
 The federation rule, organization, service account, and workspace IDs are defaults in
 [`action.yml`](action.yml). They are not secret.
 
-1. **Create the agent.** Actions tab → **Set up reviewer agent** → Run workflow.
-2. **Turn it on in a repo.** Copy [`examples/claude-review.yml`](examples/claude-review.yml) to
+1. **Give Claude Code an API key.** Claude Code runs inside the sandbox and needs its own key. In
+   the Console, create a vault named `pr-reviewer` with one environment-variable credential:
+   secret name `ANTHROPIC_API_KEY`, the key as its value, and allowed host `api.anthropic.com`.
+   The key never enters the sandbox; Anthropic swaps it in on requests to that host.
+2. **Create the agent.** Actions tab → **Set up reviewer agent** → Run workflow.
+3. **Turn it on in a repo.** Copy [`examples/claude-review.yml`](examples/claude-review.yml) to
    `.github/workflows/claude-review.yml` there. It takes effect once it's on the default branch.
    The repo must match a federation rule in the Console
    ([Workload identity](https://platform.claude.com/settings/workload-identity-federation)).
@@ -65,7 +71,11 @@ The federation rule, organization, service account, and workspace IDs are defaul
 
 - The PR's code is never checked out or run on the Actions runner, which is what makes
   `pull_request_target` safe here. It only runs inside Anthropic's sandbox.
-- The sandbox has no secrets. The GitHub token is injected by Anthropic's git proxy, and the
-  environment's network is limited to package registries.
+- The sandbox can't read any secret: the GitHub token is injected by Anthropic's git proxy and the
+  Claude Code key is swapped in at egress. But anything running in the sandbox, including code a
+  PR adds, can *use* the key on `api.anthropic.com`. Claude Code loads only user settings, so a PR
+  can't add hooks or MCP servers, but for defense in depth give the vault key its own Console
+  workspace with a low spend limit, separate from the workspace that holds the reviewer agent.
+  Network egress is limited to package registries and `api.anthropic.com`.
 - PR text is treated as data, but a malicious PR could still steer what the review says. Reviews are
   `COMMENT` only, so the worst case is a misleading comment.

@@ -16,8 +16,8 @@ is that relay: no server to host, and it gets a GitHub token for free.
 
 1. The workflow fires on `pull_request_target` and runs `src/review.ts`.
 2. The script fetches the PR diff, uploads it, and creates a session on the `pr-reviewer` agent with
-   the repo mounted as a `github_repository` resource (at the PR head, or at the merge base plus the
-   diff for fork PRs). Each session has a hard spend cap (`budget-usd`, default $5).
+   the repo mounted at the PR's merge base as a `github_repository` resource. Each session has a hard
+   spend cap (`budget-usd`, default $5); Claude Code's own API calls bill to the vault key instead.
 3. In its sandbox, the agent applies the diff on top of the merge base, installs Claude Code, and
    runs the bundled `/code-review` at medium effort. It converts the findings into
    `/mnt/session/outputs/review.json`, one inline comment per finding tied to a changed line.

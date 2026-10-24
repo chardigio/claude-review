@@ -237,30 +237,46 @@ const comments = (review.comments ?? []).slice(0, MAX_INLINE_COMMENTS).map((c) =
   };
 });
 
-try {
-  await octokit.pulls.createReview({
-    owner,
-    repo,
-    pull_number: pr.number,
-    commit_id: pr.head.sha,
-    event: "COMMENT",
-    body: review.summary + footer,
-    comments,
-  });
-} catch (err) {
-  // GitHub rejects the whole review if any comment points outside the diff.
-  // Fall back to putting every finding in the review body.
-  console.log(`Inline review failed (${err}); posting findings in the review body.`);
-  const listed = comments
-    .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
-    .join("\n");
-  await octokit.pulls.createReview({
-    owner,
-    repo,
-    pull_number: pr.number,
-    commit_id: pr.head.sha,
-    event: "COMMENT",
-    body: review.summary + (listed ? `\n\n${listed}` : "") + footer,
-  });
+async function postReview(gh: Octokit) {
+  try {
+    await gh.pulls.createReview({
+      owner,
+      repo,
+      pull_number: pr.number,
+      commit_id: pr.head.sha,
+      event: "COMMENT",
+      body: review!.summary + footer,
+      comments,
+    });
+  } catch (err) {
+    // GitHub rejects the whole review if any comment points outside the diff.
+    // Fall back to putting every finding in the review body.
+    console.log(`Inline review failed (${err}); posting findings in the review body.`);
+    const listed = comments
+      .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
+      .join("\n");
+    await gh.pulls.createReview({
+      owner,
+      repo,
+      pull_number: pr.number,
+      commit_id: pr.head.sha,
+      event: "COMMENT",
+      body: review!.summary + (listed ? `\n\n${listed}` : "") + footer,
+    });
+  }
+}
+
+// Post as the Claude GitHub App when the action got its token; if that fails
+// for any reason (expired, uninstalled mid-run), post with the job token.
+const appToken = process.env.CLAUDE_APP_TOKEN;
+if (appToken) {
+  try {
+    await postReview(new Octokit({ auth: appToken }));
+  } catch (err) {
+    console.log(`Posting as the Claude app failed (${err}); posting as github-actions.`);
+    await postReview(octokit);
+  }
+} else {
+  await postReview(octokit);
 }
 console.log(`Posted review with ${comments.length} inline comments.`);

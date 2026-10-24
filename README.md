@@ -29,23 +29,20 @@ and every later review uses it.
 
 ## Setup
 
-1. **API key.** In the Anthropic Console org that receives your Max plan credits, create a key at
-   <https://platform.claude.com/settings/keys>.
-2. **Add the key to this repo** as an Actions secret named `ANTHROPIC_API_KEY`
-   (Settings → Secrets and variables → Actions → New repository secret).
-3. **Create the agent.** Actions tab → **Set up reviewer agent** → Run workflow.
-4. **Turn it on in a repo.** Copy [`examples/claude-review.yml`](examples/claude-review.yml) to
-   `.github/workflows/claude-review.yml` there, and add the same `ANTHROPIC_API_KEY` secret to that
-   repo (or once at the org level for org repos). The workflow takes effect once it's on the default
-   branch.
+Auth uses [Workload Identity Federation](https://platform.claude.com/docs/en/manage-claude/wif-providers/github-actions):
+each job signs in to Anthropic with its own GitHub identity token, so no repo holds an API key.
+The federation rule, organization, service account, and workspace IDs are defaults in
+[`action.yml`](action.yml). They are not secret.
 
-Adding the secret to several personal repos at once with the GitHub CLI:
+1. **Create the agent.** Actions tab → **Set up reviewer agent** → Run workflow.
+2. **Turn it on in a repo.** Copy [`examples/claude-review.yml`](examples/claude-review.yml) to
+   `.github/workflows/claude-review.yml` there. It takes effect once it's on the default branch.
+   The repo must match a federation rule in the Console
+   ([Workload identity](https://platform.claude.com/settings/workload-identity-federation)).
+   A repo outside those rules can pass its own `anthropic-federation-rule-id`, or an
+   `anthropic-api-key` from a secret instead.
 
-```sh
-for r in hermes-assistant draft-machine fcc-app; do
-  gh secret set ANTHROPIC_API_KEY --repo "sddamico/$r" < key.txt
-done
-```
+**Verify Anthropic auth** makes one API call with the federation rule, to check it works.
 
 ## When it runs
 

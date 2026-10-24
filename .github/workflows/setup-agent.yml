@@ -1,6 +1,6 @@
 # Creates or updates the reviewer agent and its environment in your Anthropic
-# org. Run it once after adding ANTHROPIC_API_KEY to this repo's secrets, and
-# again whenever you change src/agent.ts.
+# org. Run it once from the Actions tab; it runs again whenever src/agent.ts
+# changes on main. Signs in with Workload Identity Federation, no secret needed.
 name: Set up reviewer agent
 
 on:
@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   setup:
@@ -21,6 +22,15 @@ jobs:
         with:
           node-version: 24
       - run: npm ci --omit=dev --no-audit --no-fund
+      - name: Get GitHub identity token
+        run: |
+          curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
+            | jq -r .value > "$RUNNER_TEMP/anthropic-identity-token"
       - run: node src/setup.ts
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/anthropic-identity-token
+          ANTHROPIC_FEDERATION_RULE_ID: fdrl_013RuAs3AjQTQr3uCkSTd9GT
+          ANTHROPIC_ORGANIZATION_ID: 8c9741ac-80cb-4921-83b0-035db2ece654
+          ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01THaxpeHHsA5tcgrogWYzwM
+          ANTHROPIC_WORKSPACE_ID: wrkspc_01PGX6ZU3jcE98gaDxSEJb2P

@@ -1,23 +1,13 @@
 # Signs in to Anthropic with this job's GitHub identity token (Workload Identity
-# Federation) and makes one API call. Run it from the Actions tab to test a
-# federation rule; none of the inputs are secret.
+# Federation) and makes one API call. Runs when this file changes, or from the
+# Actions tab. None of these IDs are secret.
 name: Verify Anthropic auth
 
 on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/verify-auth.yml, src/verify-auth.ts]
   workflow_dispatch:
-    inputs:
-      federation-rule-id:
-        description: Federation rule (fdrl_...)
-        required: true
-      organization-id:
-        description: Anthropic organization ID (UUID)
-        required: true
-      service-account-id:
-        description: Service account (svac_...)
-        required: true
-      workspace-id:
-        description: Workspace (wrkspc_...), only if the rule covers more than one workspace
-        required: false
 
 permissions:
   contents: read
@@ -41,7 +31,7 @@ jobs:
         run: node src/verify-auth.ts
         env:
           ANTHROPIC_IDENTITY_TOKEN_FILE: ${{ runner.temp }}/anthropic-identity-token
-          ANTHROPIC_FEDERATION_RULE_ID: ${{ inputs.federation-rule-id }}
-          ANTHROPIC_ORGANIZATION_ID: ${{ inputs.organization-id }}
-          ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.service-account-id }}
-          ANTHROPIC_WORKSPACE_ID: ${{ inputs.workspace-id }}
+          ANTHROPIC_FEDERATION_RULE_ID: fdrl_013RuAs3AjQTQr3uCkSTd9GT
+          ANTHROPIC_ORGANIZATION_ID: 8c9741ac-80cb-4921-83b0-035db2ece654
+          ANTHROPIC_SERVICE_ACCOUNT_ID: svac_01THaxpeHHsA5tcgrogWYzwM
+          ANTHROPIC_WORKSPACE_ID: wrkspc_01PGX6ZU3jcE98gaDxSEJb2P

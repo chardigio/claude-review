@@ -7,19 +7,21 @@ branding:
 inputs:
   anthropic-api-key:
     description: >-
-      Anthropic API key from the Console org that holds the reviewer agent. Leave
-      empty to authenticate with Workload Identity Federation instead (needs
-      `id-token: write` on the job and the federation inputs below).
+      Anthropic API key. Leave empty (the default) to sign in with Workload
+      Identity Federation instead, which needs `id-token: write` on the job.
     default: ""
   anthropic-federation-rule-id:
     description: WIF federation rule (fdrl_...). Not secret.
-    default: ""
+    default: fdrl_013RuAs3AjQTQr3uCkSTd9GT
   anthropic-organization-id:
     description: Anthropic organization ID (UUID). Not secret.
-    default: ""
+    default: 8c9741ac-80cb-4921-83b0-035db2ece654
   anthropic-service-account-id:
     description: The federation rule's target service account (svac_...). Not secret.
-    default: ""
+    default: svac_01THaxpeHHsA5tcgrogWYzwM
+  anthropic-workspace-id:
+    description: Workspace the reviewer runs in (wrkspc_...). Not secret.
+    default: wrkspc_01PGX6ZU3jcE98gaDxSEJb2P
   github-token:
     description: Token used to read the PR, clone the repo into the sandbox, and post the review.
     default: ${{ github.token }}
@@ -29,9 +31,6 @@ inputs:
   extra-instructions:
     description: Repo-specific guidance appended to the review request.
     default: ""
-  anthropic-workspace-id:
-    description: Console workspace ID, only used to build the live session link in the log.
-    default: default
 
 runs:
   using: composite
@@ -62,6 +61,7 @@ runs:
         ANTHROPIC_FEDERATION_RULE_ID: ${{ inputs.anthropic-federation-rule-id }}
         ANTHROPIC_ORGANIZATION_ID: ${{ inputs.anthropic-organization-id }}
         ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.anthropic-service-account-id }}
+        ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic-workspace-id }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_BUDGET_USD: ${{ inputs.budget-usd }}
         INPUT_EXTRA_INSTRUCTIONS: ${{ inputs.extra-instructions }}

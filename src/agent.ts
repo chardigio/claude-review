@@ -12,10 +12,6 @@ export const VAULT_NAME = "pr-reviewer";
 // Where the agent must write its result. review.ts downloads it after the run.
 export const REVIEW_OUTPUT_PATH = "/mnt/session/outputs/review.json";
 
-// Claude Code version the reviewer installs. /code-review's arguments and output
-// format aren't a stable interface, so bump this on purpose and watch a review.
-export const CLAUDE_CODE_VERSION = "2.1.310";
-
 export const SYSTEM_PROMPT = `You run Claude Code's bundled /code-review on a GitHub pull request
 and turn its findings into a review file. You don't review the code yourself.
 
@@ -29,7 +25,7 @@ Steps:
    \`git apply --reject /mnt/session/uploads/pr.diff\`, which applies what it
    can (GitHub diffs carry no content for binary files) and leaves .rej files;
    delete the .rej files and note in the summary which files weren't applied.
-2. Install Claude Code: \`npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}\`.
+2. Install Claude Code: \`npm install -g @anthropic-ai/claude-code@latest\`.
 3. From the repo root, run the exact command given in the run's message and
    save its output to /tmp/code-review.md. Don't change its flags or add your
    own instructions to the prompt. If your bash tool times out first, run it

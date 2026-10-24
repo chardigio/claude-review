@@ -1,7 +1,6 @@
 # Reviews this repo's own PRs with the action from this repo.
 name: Claude review
 
-
 on:
   # pull_request_target runs this file from the base branch with secrets
   # available, so PRs from forks get reviewed too. It is safe here because the

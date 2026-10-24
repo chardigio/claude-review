@@ -23,8 +23,17 @@ inputs:
     description: Workspace the reviewer runs in (wrkspc_...). Not secret.
     default: wrkspc_01PGX6ZU3jcE98gaDxSEJb2P
   github-token:
-    description: Token used to read the PR, clone the repo into the sandbox, and post the review.
+    description: >-
+      Token used to read the PR, clone the repo into the sandbox, and post the
+      review. Leave it as the default to post as the Claude GitHub App when
+      it's installed on the repo, or as github-actions otherwise.
     default: ${{ github.token }}
+  post-as-claude:
+    description: >-
+      Post the review as the Claude GitHub App (claude[bot]) instead of
+      github-actions[bot]. Needs the app installed on the repo and
+      `id-token: write`; falls back to github-actions when either is missing.
+    default: "true"
   budget-usd:
     description: >-
       Spend cap in US dollars for each review, applied separately to the Managed
@@ -57,6 +66,32 @@ runs:
           "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
           | jq -r .value > "$RUNNER_TEMP/anthropic-identity-token"
         echo "ANTHROPIC_IDENTITY_TOKEN_FILE=$RUNNER_TEMP/anthropic-identity-token" >> "$GITHUB_ENV"
+    # Same OIDC exchange the official Claude Code action uses: Anthropic checks
+    # the job's identity token and returns a short-lived Claude app token for
+    # this repo. Only when the caller didn't pass their own github-token.
+    - name: Get Claude GitHub App token
+      id: claude-app
+      if: inputs.post-as-claude == 'true' && inputs.github-token == github.token
+      # Any failure here just means the review posts as github-actions.
+      continue-on-error: true
+      shell: bash
+      run: |
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+          echo "::warning::No OIDC token available, so the review will post as github-actions."
+          exit 0
+        fi
+        oidc=$(curl -sSf --max-time 30 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=claude-code-github-action" | jq -r .value)
+        resp=$(curl -sS --max-time 30 -X POST -H "Authorization: Bearer $oidc" -H "Content-Type: application/json" \
+          -d '{"permissions":{"contents":"read","pull_requests":"write"}}' \
+          https://api.anthropic.com/api/github/github-app-token-exchange)
+        token=$(jq -r '.token // .app_token // empty' <<<"$resp")
+        if [ -z "$token" ]; then
+          echo "::warning::Couldn't get a Claude GitHub App token, so the review will post as github-actions. Is the Claude app installed on this repo? $(jq -c '.error.message // .message // .' <<<"$resp")"
+          exit 0
+        fi
+        echo "::add-mask::$token"
+        echo "token=$token" >> "$GITHUB_OUTPUT"
     - name: Run review
       shell: bash
       run: node "$GITHUB_ACTION_PATH/src/review.ts"
@@ -66,7 +101,16 @@ runs:
         ANTHROPIC_ORGANIZATION_ID: ${{ inputs.anthropic-organization-id }}
         ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ inputs.anthropic-service-account-id }}
         ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic-workspace-id }}
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ steps.claude-app.outputs.token || inputs.github-token }}
         INPUT_BUDGET_USD: ${{ inputs.budget-usd }}
         INPUT_EXTRA_INSTRUCTIONS: ${{ inputs.extra-instructions }}
         INPUT_ANTHROPIC_WORKSPACE_ID: ${{ inputs.anthropic-workspace-id }}
+    # Revoke the app token now rather than letting it live out its hour.
+    - name: Revoke Claude GitHub App token
+      if: always() && steps.claude-app.outputs.token != ''
+      continue-on-error: true
+      shell: bash
+      run: |
+        curl -sS --max-time 30 -X DELETE -H "Authorization: Bearer $TOKEN" https://api.github.com/installation/token
+      env:
+        TOKEN: ${{ steps.claude-app.outputs.token }}

@@ -20,8 +20,8 @@ type ReviewComment = {
   verdict?: string;
   verdict_reason?: string;
 };
-type Risk = { level?: string; reason?: string };
-type Review = { summary: string; risk?: Risk; comments: ReviewComment[] };
+type Rating = { level?: string; reason?: string };
+type Review = { summary: string; review_effort?: Rating; risk?: Rating; comments: ReviewComment[] };
 
 const RISK_LABELS: Record<string, string> = { low: "Low", medium: "Medium", high: "High" };
 const VERDICT_LABELS: Record<string, string> = {
@@ -42,7 +42,7 @@ const pr = event.pull_request;
 if (!pr) throw new Error("This action only runs on pull_request or pull_request_target events.");
 
 const [owner, repo] = env("GITHUB_REPOSITORY").split("/");
-const budgetUsd = Number(process.env.INPUT_BUDGET_USD || "5");
+const budgetUsd = Number(process.env.INPUT_BUDGET_USD || "7.5");
 const extraInstructions = process.env.INPUT_EXTRA_INSTRUCTIONS?.trim() ?? "";
 const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID?.trim() || "default";
 
@@ -107,8 +107,8 @@ const message = [
   `The repo is checked out at the merge base ${checkoutSha}.`,
   // Project settings would let the PR add hooks or MCP servers to Claude Code,
   // so only user settings load. The budget caps Claude Code's own spend.
-  `Run this from the repo root:\n\`\`\`\nIS_SANDBOX=1 claude -p "/code-review medium" --dangerously-skip-permissions ` +
-    `--model claude-opus-5-5 --effort medium --setting-sources user --strict-mcp-config --max-budget-usd ${budgetUsd} > /tmp/code-review.md\n\`\`\``,
+  `Run this from the repo root, with EFFORT replaced by the level you pick:\n\`\`\`\nIS_SANDBOX=1 claude -p "/code-review EFFORT" --dangerously-skip-permissions ` +
+    `--model claude-opus-5-5 --effort EFFORT --setting-sources user --strict-mcp-config --max-budget-usd ${budgetUsd} > /tmp/code-review.md\n\`\`\``,
   `<pr_title>${pr.title}</pr_title>`,
   `<pr_description>\n${pr.body ?? "(none)"}\n</pr_description>`,
   extraInstructions &&
@@ -261,7 +261,11 @@ const risk = review.risk;
 const riskLine = risk?.level
   ? `**Merge risk: ${RISK_LABELS[risk.level] ?? risk.level}.** ${risk.reason ?? ""}`.trimEnd() + "\n\n"
   : "";
-const summary = riskLine + review.summary + (tally ? `\n\nVerdicts: ${tally}.` : "");
+const effort = review.review_effort;
+const effortLine = effort?.level
+  ? `\n\n_Reviewed at ${effort.level} effort.${effort.reason ? ` ${effort.reason}` : ""}_`
+  : "";
+const summary = riskLine + review.summary + (tally ? `\n\nVerdicts: ${tally}.` : "") + effortLine;
 const listed = comments
   .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
   .join("\n");

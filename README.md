@@ -29,6 +29,12 @@ is that relay: no server to host, and it gets a GitHub token for free.
    verdicts in the summary, and each finding's verdict in its inline comment. It never approves or
    requests changes.
 
+When the PR has been reviewed before, the next review is a follow-up: the agent reviews only the
+commits since its last review, with the whole PR in the working tree for context, reports which
+earlier findings are fixed or still open, and updates its risk rating. If the PR was rebased or the
+base branch was merged in since, the new commits can't be separated cleanly, so it reviews the
+whole PR again, still with the last review in hand.
+
 The agent definition (model, system prompt, tools) lives in [`src/agent.ts`](src/agent.ts).
 Change it and push to `main`; the **Set up reviewer agent** workflow publishes a new agent version
 and every later review uses it.

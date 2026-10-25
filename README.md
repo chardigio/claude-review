@@ -20,7 +20,8 @@ is that relay: no server to host, and it gets a GitHub token for free.
    spend cap (`budget-usd`, default $5), and Claude Code's run, which bills to the vault key, gets the
    same cap through `--max-budget-usd`.
 3. In its sandbox, the agent applies the diff on top of the merge base, installs Claude Code, and
-   runs the bundled `/code-review` at medium effort. It then checks each finding against the code
+   runs the bundled `/code-review` at low, medium, or high effort, which it picks from a quick read
+   of the diff by size, complexity, and potential impact. It then checks each finding against the code
    (valid, unlikely, not worth fixing, or incorrect, with the reason) and rates the risk of merging
    (low, medium, or high, by what the change could break). It writes all of that to
    `/mnt/session/outputs/review.json`, one inline comment per finding tied to a changed line.

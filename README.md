@@ -20,10 +20,13 @@ is that relay: no server to host, and it gets a GitHub token for free.
    spend cap (`budget-usd`, default $5), and Claude Code's run, which bills to the vault key, gets the
    same cap through `--max-budget-usd`.
 3. In its sandbox, the agent applies the diff on top of the merge base, installs Claude Code, and
-   runs the bundled `/code-review` at medium effort. It converts the findings into
+   runs the bundled `/code-review` at medium effort. It then checks each finding against the code
+   (valid, unlikely, not worth fixing, or incorrect, with the reason) and rates the risk of merging
+   (low, medium, or high, by what the change could break). It writes all of that to
    `/mnt/session/outputs/review.json`, one inline comment per finding tied to a changed line.
-4. The script downloads that file and posts one `COMMENT` review with inline comments. It never
-   approves or requests changes.
+4. The script downloads that file and posts one `COMMENT` review: the merge risk and a count of
+   verdicts in the summary, and each finding's verdict in its inline comment. It never approves or
+   requests changes.
 
 The agent definition (model, system prompt, tools) lives in [`src/agent.ts`](src/agent.ts).
 Change it and push to `main`; the **Set up reviewer agent** workflow publishes a new agent version

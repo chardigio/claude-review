@@ -17,8 +17,19 @@ type ReviewComment = {
   start_line?: number;
   severity?: string;
   body: string;
+  verdict?: string;
+  verdict_reason?: string;
 };
-type Review = { summary: string; comments: ReviewComment[] };
+type Risk = { level?: string; reason?: string };
+type Review = { summary: string; risk?: Risk; comments: ReviewComment[] };
+
+const RISK_LABELS: Record<string, string> = { low: "Low", medium: "Medium", high: "High" };
+const VERDICT_LABELS: Record<string, string> = {
+  valid: "Valid",
+  unlikely: "Unlikely",
+  not_worth_fixing: "Not worth fixing",
+  incorrect: "Incorrect",
+};
 
 function env(name: string): string {
   const value = process.env[name];
@@ -225,19 +236,32 @@ const footer =
 
 // --- Post it to the PR ----------------------------------------------------------
 
-const comments = (review.comments ?? []).slice(0, MAX_INLINE_COMMENTS).map((c) => {
+const findings = (review.comments ?? []).slice(0, MAX_INLINE_COMMENTS);
+const comments = findings.map((c) => {
   const label = c.severity ? `**${c.severity}:** ` : "";
+  const verdict = c.verdict
+    ? `\n\n**Validation: ${VERDICT_LABELS[c.verdict] ?? c.verdict}.** ${c.verdict_reason ?? ""}`.trimEnd()
+    : "";
   const multiLine = c.start_line && c.start_line < c.line;
   return {
     path: c.path,
     line: c.line,
     side: "RIGHT" as const,
     ...(multiLine ? { start_line: c.start_line, start_side: "RIGHT" as const } : {}),
-    body: label + c.body,
+    body: label + c.body + verdict,
   };
 });
 
-const summary = review.summary;
+const tally = Object.entries(VERDICT_LABELS)
+  .map(([key, label]) => [label, findings.filter((c) => c.verdict === key).length] as const)
+  .filter(([, n]) => n > 0)
+  .map(([label, n]) => `${n} ${label.toLowerCase()}`)
+  .join(", ");
+const risk = review.risk;
+const riskLine = risk?.level
+  ? `**Merge risk: ${RISK_LABELS[risk.level] ?? risk.level}.** ${risk.reason ?? ""}`.trimEnd() + "\n\n"
+  : "";
+const summary = riskLine + review.summary + (tally ? `\n\nVerdicts: ${tally}.` : "");
 const listed = comments
   .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
   .join("\n");

@@ -48,7 +48,8 @@ The federation rule, organization, service account, and workspace IDs are defaul
    A repo outside those rules can pass its own `anthropic-federation-rule-id`, or an
    `anthropic-api-key` from a secret instead.
 
-Reviews post as github-actions.
+Reviews post as the identity of `github-token`, github-actions by default. A github-actions review
+doesn't trigger other workflows, so `pull_request_review` workflows won't run on it.
 
 **Verify Anthropic auth** makes one API call with the federation rule, to check it works.
 

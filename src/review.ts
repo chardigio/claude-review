@@ -241,7 +241,6 @@ const summary = review.summary;
 const listed = comments
   .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
   .join("\n");
-const status = (err: unknown) => (err as { status?: number }).status;
 
 const params = { owner, repo, pull_number: pr.number, commit_id: pr.head.sha, event: "COMMENT" as const };
 try {
@@ -249,7 +248,7 @@ try {
 } catch (err) {
   // GitHub rejects the whole review (422) if any comment points outside the
   // diff. Fall back to putting every finding in the review body.
-  if (status(err) !== 422) throw err;
+  if ((err as { status?: number }).status !== 422) throw err;
   console.log(`Inline review rejected (${err}); posting findings in the review body.`);
   await octokit.pulls.createReview({ ...params, body: summary + (listed ? `\n\n${listed}` : "") + footer });
 }

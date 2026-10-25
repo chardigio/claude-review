@@ -42,7 +42,7 @@ const pr = event.pull_request;
 if (!pr) throw new Error("This action only runs on pull_request or pull_request_target events.");
 
 const [owner, repo] = env("GITHUB_REPOSITORY").split("/");
-const budgetUsd = Number(process.env.INPUT_BUDGET_USD || "5");
+const budgetUsd = Number(process.env.INPUT_BUDGET_USD || "7.5");
 const extraInstructions = process.env.INPUT_EXTRA_INSTRUCTIONS?.trim() ?? "";
 const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID?.trim() || "default";
 

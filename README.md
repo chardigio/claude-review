@@ -17,7 +17,7 @@ is that relay: no server to host, and it gets a GitHub token for free.
 1. The workflow fires on `pull_request_target` and runs `src/review.ts`.
 2. The script fetches the PR diff, uploads it, and creates a session on the `pr-reviewer` agent with
    the repo mounted at the PR's merge base as a `github_repository` resource. Each session has a hard
-   spend cap (`budget-usd`, default $5), and Claude Code's run, which bills to the vault key, gets the
+   spend cap (`budget-usd`, default $7.50), and Claude Code's run, which bills to the vault key, gets the
    same cap through `--max-budget-usd`.
 3. In its sandbox, the agent applies the diff on top of the merge base, installs Claude Code, and
    runs the bundled `/code-review` at low, medium, or high effort, which it picks from a quick read
@@ -69,7 +69,7 @@ doesn't trigger other workflows, so `pull_request_review` workflows won't run on
 - uses: sddamico/claude-review@main
   with:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    budget-usd: "10"                       # per-session cap, default 5
+    budget-usd: "10"                       # per-session cap, default 7.5
     extra-instructions: "We target iOS 17+; flag any API that needs a newer OS."
     anthropic-workspace-id: wrkspc_...      # only for the live session link in the log
 ```

@@ -243,31 +243,14 @@ const listed = comments
   .join("\n");
 const status = (err: unknown) => (err as { status?: number }).status;
 
-async function postReview(gh: Octokit) {
-  const params = { owner, repo, pull_number: pr.number, commit_id: pr.head.sha, event: "COMMENT" as const };
-  try {
-    await gh.pulls.createReview({ ...params, body: summary + footer, comments });
-  } catch (err) {
-    // GitHub rejects the whole review (422) if any comment points outside the
-    // diff. Fall back to putting every finding in the review body.
-    if (status(err) !== 422) throw err;
-    console.log(`Inline review rejected (${err}); posting findings in the review body.`);
-    await gh.pulls.createReview({ ...params, body: summary + (listed ? `\n\n${listed}` : "") + footer });
-  }
-}
-
-// Post as the Claude GitHub App when the action got its token, and with the
-// job token if the app token is refused (expired, or uninstalled mid-run).
-const appToken = process.env.CLAUDE_APP_TOKEN;
-const posters = appToken ? [new Octokit({ auth: appToken }), octokit] : [octokit];
-for (const [i, gh] of posters.entries()) {
-  try {
-    await postReview(gh);
-    break;
-  } catch (err) {
-    const refused = [401, 403, 404].includes(status(err) ?? 0);
-    if (!refused || i === posters.length - 1) throw err;
-    console.log(`The Claude app token was refused (${err}); posting as github-actions.`);
-  }
+const params = { owner, repo, pull_number: pr.number, commit_id: pr.head.sha, event: "COMMENT" as const };
+try {
+  await octokit.pulls.createReview({ ...params, body: summary + footer, comments });
+} catch (err) {
+  // GitHub rejects the whole review (422) if any comment points outside the
+  // diff. Fall back to putting every finding in the review body.
+  if (status(err) !== 422) throw err;
+  console.log(`Inline review rejected (${err}); posting findings in the review body.`);
+  await octokit.pulls.createReview({ ...params, body: summary + (listed ? `\n\n${listed}` : "") + footer });
 }
 console.log(`Posted review with ${comments.length} inline comments.`);

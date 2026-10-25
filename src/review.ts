@@ -79,6 +79,8 @@ try {
 
 // --- Look for this bot's last review on the PR ----------------------------------
 
+// Only reviews that finished carry this marker in their footer, so a failed run
+// never counts as the review a follow-up builds on.
 const REVIEW_MARKER = "Reviewed by Claude (Managed Agents)";
 
 async function compareDiff(basehead: string): Promise<string> {
@@ -97,7 +99,9 @@ const reviews = await octokit.paginate(octokit.pulls.listReviews, {
   pull_number: pr.number,
   per_page: 100,
 });
-const previous = reviews.filter((r) => r.user?.type === "Bot" && r.body?.includes(REVIEW_MARKER)).at(-1);
+const previous = reviews
+  .filter((r) => r.user?.type === "Bot" && r.commit_id && r.body?.includes(REVIEW_MARKER))
+  .at(-1);
 
 let previousReview = "";
 let followUp: { since: string; reviewedDiff: string; newDiff: string } | undefined;
@@ -124,11 +128,12 @@ if (previous?.commit_id) {
         octokit.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${pr.base.sha}...${previous.commit_id}`, per_page: 1 }),
       ]);
       if (sinceThen.status === "ahead" && before.merge_base_commit.sha === checkoutSha) {
-        followUp = {
-          since: previous.commit_id,
-          reviewedDiff: await compareDiff(`${checkoutSha}...${previous.commit_id}`),
-          newDiff: await compareDiff(`${previous.commit_id}...${pr.head.sha}`),
-        };
+        const [reviewedDiff, newDiff] = await Promise.all([
+          compareDiff(`${checkoutSha}...${previous.commit_id}`),
+          compareDiff(`${previous.commit_id}...${pr.head.sha}`),
+        ]);
+        // New commits that cancel out (a commit and its revert) leave nothing to review on its own.
+        if (newDiff.trim()) followUp = { since: previous.commit_id, reviewedDiff, newDiff };
       }
     } catch (err) {
       console.log(`Could not diff against the last review, reviewing the whole PR: ${err}`);
@@ -313,8 +318,11 @@ if (!review) {
 
 const finished = await client.beta.sessions.retrieve(session.id);
 const cents = Number(finished.usage?.list_cost?.amount ?? 0);
+// The agent rates the risk only once /code-review has run, so a review without
+// one is an error report, not a review.
 const footer =
-  `\n\n---\n<sub>Reviewed by Claude (Managed Agents) · list cost $${(cents / 100).toFixed(2)}` +
+  `\n\n---\n<sub>${review.risk?.level ? REVIEW_MARKER : "Review by Claude (Managed Agents) didn't finish"}` +
+  ` · list cost $${(cents / 100).toFixed(2)}` +
   ` · session \`${session.id}\`</sub>`;
 
 // --- Post it to the PR ----------------------------------------------------------

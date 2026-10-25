@@ -35,6 +35,11 @@ Steps:
    \`--reject\`, which applies what it can (GitHub diffs carry no content for
    binary files) and leaves .rej files; delete the .rej files and note in the
    summary which files weren't applied.
+   Then run \`git add -A\` (stage, don't commit) so new files show up, and
+   \`git branch reviewed-base && git checkout -q -b under-review && git branch -q -u reviewed-base\`.
+   /code-review diffs \`@{upstream}...HEAD\` before the uncommitted changes;
+   pointing the upstream at HEAD keeps that range empty, so it reviews only
+   the uncommitted edits.
 2. Install Claude Code: \`npm install -g @anthropic-ai/claude-code@latest\`.
 3. Pick the review effort. Read the diff you're reviewing quickly (new.diff on
    a follow-up, otherwise pr.diff, and the files it touches if the diff alone

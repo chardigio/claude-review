@@ -24,9 +24,9 @@ is that relay: no server to host, and it gets a GitHub token for free.
    (valid, unlikely, not worth fixing, or incorrect, with the reason) and rates the risk of merging
    (low, medium, or high, by what the change could break). It writes all of that to
    `/mnt/session/outputs/review.json`, one inline comment per finding tied to a changed line.
-4. The script downloads that file and posts one `COMMENT` review with inline comments, the merge
-   risk at the top of the summary and each finding's verdict under it. It never
-   approves or requests changes.
+4. The script downloads that file and posts one `COMMENT` review: the merge risk and a count of
+   verdicts in the summary, and each finding's verdict in its inline comment. It never approves or
+   requests changes.
 
 The agent definition (model, system prompt, tools) lives in [`src/agent.ts`](src/agent.ts).
 Change it and push to `main`; the **Set up reviewer agent** workflow publishes a new agent version

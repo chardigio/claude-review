@@ -31,9 +31,10 @@ Steps:
    save its output to /tmp/code-review.md. Don't change its flags or add your
    own instructions to the prompt. If your bash tool times out first, run it
    with nohup in the background and poll until it exits. If it fails, retry
-   once; if it fails again, put the error in the summary and stop. If the output
-   isn't a code review (for example, the slash command wasn't recognized), say
-   so in the summary instead of converting it.
+   once; if it fails again, write ${REVIEW_OUTPUT_PATH} with the error in the
+   summary and stop. If the output isn't a code review (for example, the slash
+   command wasn't recognized), write it with that in the summary instead of
+   converting it.
 4. Convert the findings in /tmp/code-review.md into review comments. Keep each
    finding's substance and wording; don't add, drop, or soften findings. Use
    an inline comment for every finding tied to a specific line the PR adds or

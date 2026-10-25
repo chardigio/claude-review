@@ -20,9 +20,10 @@ type ReviewComment = {
   verdict?: string;
   verdict_reason?: string;
 };
-type Risk = { level: string; reason: string };
+type Risk = { level?: string; reason?: string };
 type Review = { summary: string; risk?: Risk; comments: ReviewComment[] };
 
+const RISK_LABELS: Record<string, string> = { low: "Low", medium: "Medium", high: "High" };
 const VERDICT_LABELS: Record<string, string> = {
   valid: "Valid",
   unlikely: "Unlikely",
@@ -256,10 +257,11 @@ const tally = Object.entries(VERDICT_LABELS)
   .filter(([, n]) => n > 0)
   .map(([label, n]) => `${n} ${label.toLowerCase()}`)
   .join(", ");
-const riskLine = review.risk
-  ? `**Merge risk: ${review.risk.level[0].toUpperCase()}${review.risk.level.slice(1)}.** ${review.risk.reason}\n\n`
+const risk = review.risk;
+const riskLine = risk?.level
+  ? `**Merge risk: ${RISK_LABELS[risk.level] ?? risk.level}.** ${risk.reason ?? ""}`.trimEnd() + "\n\n"
   : "";
-const summary = riskLine + review.summary + (tally ? `\n\nInline findings: ${tally}.` : "");
+const summary = riskLine + review.summary + (tally ? `\n\nVerdicts: ${tally}.` : "");
 const listed = comments
   .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
   .join("\n");

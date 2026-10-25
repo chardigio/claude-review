@@ -77,6 +77,72 @@ try {
   console.log(`Could not find the merge base, cloning the base branch tip instead: ${err}`);
 }
 
+// --- Look for this bot's last review on the PR ----------------------------------
+
+const REVIEW_MARKER = "Reviewed by Claude (Managed Agents)";
+
+async function compareDiff(basehead: string): Promise<string> {
+  const { data } = await octokit.repos.compareCommitsWithBasehead({
+    owner,
+    repo,
+    basehead,
+    mediaType: { format: "diff" },
+  });
+  return data as unknown as string;
+}
+
+const reviews = await octokit.paginate(octokit.pulls.listReviews, {
+  owner,
+  repo,
+  pull_number: pr.number,
+  per_page: 100,
+});
+const previous = reviews.filter((r) => r.user?.type === "Bot" && r.body?.includes(REVIEW_MARKER)).at(-1);
+
+let previousReview = "";
+let followUp: { since: string; reviewedDiff: string; newDiff: string } | undefined;
+if (previous?.commit_id) {
+  const previousComments = await octokit.paginate(octokit.pulls.listCommentsForReview, {
+    owner,
+    repo,
+    pull_number: pr.number,
+    review_id: previous.id,
+    per_page: 100,
+  });
+  previousReview = [
+    previous.body ?? "",
+    ...previousComments.map((c) => `### ${c.path}:${c.line ?? c.original_line}\n\n${c.body}`),
+  ].join("\n\n");
+
+  // Only the new commits are reviewed when they sit on top of the reviewed head
+  // and the PR still branches from the same merge base. After a rebase or a merge
+  // from the base branch, their diff would mix in changes from outside the PR.
+  if (previous.commit_id !== pr.head.sha) {
+    try {
+      const [{ data: sinceThen }, { data: before }] = await Promise.all([
+        octokit.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${previous.commit_id}...${pr.head.sha}`, per_page: 1 }),
+        octokit.repos.compareCommitsWithBasehead({ owner, repo, basehead: `${pr.base.sha}...${previous.commit_id}`, per_page: 1 }),
+      ]);
+      if (sinceThen.status === "ahead" && before.merge_base_commit.sha === checkoutSha) {
+        followUp = {
+          since: previous.commit_id,
+          reviewedDiff: await compareDiff(`${checkoutSha}...${previous.commit_id}`),
+          newDiff: await compareDiff(`${previous.commit_id}...${pr.head.sha}`),
+        };
+      }
+    } catch (err) {
+      console.log(`Could not diff against the last review, reviewing the whole PR: ${err}`);
+    }
+  }
+}
+console.log(
+  followUp
+    ? `Follow-up review of the commits since ${followUp.since}.`
+    : previous
+      ? `Re-reviewing the whole PR; last reviewed at ${previous.commit_id}.`
+      : "First review of this PR.",
+);
+
 // --- Start the session ------------------------------------------------------
 
 const [agent, environment, vault] = await Promise.all([
@@ -97,14 +163,31 @@ if (!vault) {
   );
 }
 
-const diffFile = await client.files.upload({
-  file: await toFile(Buffer.from(diffText, "utf8"), "pr.diff", { type: "text/plain" }),
-});
+async function upload(name: string, text: string) {
+  const file = await client.files.upload({
+    file: await toFile(Buffer.from(text, "utf8"), name, { type: "text/plain" }),
+  });
+  return { type: "file" as const, file_id: file.id, mount_path: `/${name}` };
+}
+
+const files = await Promise.all([
+  upload("pr.diff", diffText),
+  ...(previousReview ? [upload("previous-review.md", previousReview)] : []),
+  ...(followUp ? [upload("reviewed.diff", followUp.reviewedDiff), upload("new.diff", followUp.newDiff)] : []),
+]);
 
 const message = [
   `Review pull request #${pr.number} in ${owner}/${repo}.`,
   `Base branch: ${pr.base.ref}. Head branch: ${pr.head.label}.`,
   `The repo is checked out at the merge base ${checkoutSha}.`,
+  followUp
+    ? `This is a follow-up review. Your last review covered the PR up to ${followUp.since}; it is in ` +
+      `previous-review.md. reviewed.diff holds the changes it covered and new.diff the commits since.`
+    : previous
+      ? `This PR was reviewed before, at ${previous.commit_id}; that review is in previous-review.md. ` +
+        `The commits since then can't be reviewed on their own (the PR was rebased or the base branch ` +
+        `was merged in, or there are none), so review the whole PR.`
+      : "This is the first review of this PR.",
   // Project settings would let the PR add hooks or MCP servers to Claude Code,
   // so only user settings load. The budget caps Claude Code's own spend.
   `Run this from the repo root, with EFFORT replaced by the level you pick:\n\`\`\`\nIS_SANDBOX=1 claude -p "/code-review EFFORT" --dangerously-skip-permissions ` +
@@ -137,7 +220,7 @@ const session = await client.beta.sessions.create({
       authorization_token: env("GITHUB_TOKEN"),
       checkout: { type: "commit", sha: checkoutSha },
     },
-    { type: "file", file_id: diffFile.id, mount_path: "/pr.diff" },
+    ...files,
   ],
 });
 console.log(`Session ${session.id}`);
@@ -265,7 +348,8 @@ const effort = review.review_effort;
 const effortLine = effort?.level
   ? `\n\n_Reviewed at ${effort.level} effort.${effort.reason ? ` ${effort.reason}` : ""}_`
   : "";
-const summary = riskLine + review.summary + (tally ? `\n\nVerdicts: ${tally}.` : "") + effortLine;
+const followUpLine = followUp ? `\n\n_Follow-up review of the commits since ${followUp.since.slice(0, 7)}._` : "";
+const summary = riskLine + review.summary + (tally ? `\n\nVerdicts: ${tally}.` : "") + followUpLine + effortLine;
 const listed = comments
   .map((c) => `- \`${c.path}:${c.line}\` ${c.body.replace(/\n/g, "\n  ")}`)
   .join("\n");

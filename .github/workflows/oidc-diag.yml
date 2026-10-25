@@ -18,3 +18,4 @@ jobs:
             curl -sS -o /tmp/r -w '%{http_code}\n' -X POST -H "Authorization: Bearer $oidc" ${data:+-H "Content-Type: application/json" -d "$data"} https://api.anthropic.com/api/github/github-app-token-exchange
             jq 'del(.token,.app_token)' /tmp/r 2>/dev/null || head -c 300 /tmp/r
           done
+# rerun 2026-10-25T01:10:59Z
